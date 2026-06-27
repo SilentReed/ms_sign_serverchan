@@ -12,18 +12,22 @@ function extract_uid_from_sendkey($sendkey) {
 
 // 极简推送：直接 GET 请求 URL 即可发送
 // API: https://<uid>.push.ft07.com/send/<sendkey>.send?title=<title>&desp=<desp>
-function send_serverchan_notification($sendkey, $title, $desp) {
+function send_serverchan_notification($sendkey, $title, $desp, $short = '') {
     $uid = extract_uid_from_sendkey($sendkey);
     if (empty($uid)) {
         return false;
     }
 
-    $url = "https://{$uid}.push.ft07.com/send/{$sendkey}.send?" . http_build_query([
+    $params = [
         'title' => $title,
         'desp'  => $desp,
         'tags'  => '贴吧签到',
-        'short' => '贴吧每日签到结果通知',
-    ]);
+    ];
+    if (!empty($short)) {
+        $params['short'] = $short;
+    }
+
+    $url = "https://{$uid}.push.ft07.com/send/{$sendkey}.send?" . http_build_query($params);
 
     // GET 请求，极简风格
     $response = file_get_contents($url);
@@ -65,15 +69,30 @@ function cron_sign_serverchan() {
         $desp = "### 用户: {$name}\n\n";
         $desp .= "| 贴吧 | 状态 |\n| --- | --- |\n";
 
+        $successCount = 0;
+        $failCount = 0;
+
         $query2 = $m->query("SELECT * FROM `" . DB_NAME . "`.`" . DB_PREFIX . "tieba` WHERE `uid` = $id");
         while ($tiebaInfo = $m->fetch_array($query2)) {
             $tiebaName = $tiebaInfo['tieba'];
-            $status = $tiebaInfo['status'] == 0 ? '✅ 成功' : '❌ 失败';
+            if ($tiebaInfo['status'] == 0) {
+                $status = '✅ 成功';
+                $successCount++;
+            } else {
+                $status = '❌ 失败';
+                $failCount++;
+            }
             $desp .= "| {$tiebaName} | {$status} |\n";
         }
 
+        // 签到总结摘要
+        $short = "{$name}: {$successCount}成功";
+        if ($failCount > 0) {
+            $short .= " {$failCount}失败";
+        }
+
         // 发送 Server酱 通知
-        send_serverchan_notification($sendkey, $title, $desp);
+        send_serverchan_notification($sendkey, $title, $desp, $short);
 
         // 更新最后通知日期
         option::uset('ms_serverchan_last_date', $today, $id);
